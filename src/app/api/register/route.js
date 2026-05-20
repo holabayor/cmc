@@ -69,8 +69,74 @@ export async function POST(req) {
 
     // 2. Database Integration Selector
     
-    // --- INTEGRATION: PostreSQL / Supabase (if DATABASE_URL is configured) ---
-    if (process.env.DATABASE_URL) {
+    // --- INTEGRATION: Supabase REST API (if SUPABASE_URL and SUPABASE_ANON_KEY are configured) ---
+    if (process.env.SUPABASE_URL && process.env.SUPABASE_ANON_KEY) {
+      try {
+        const supabaseUrl = process.env.SUPABASE_URL.replace(/\/$/, ""); // Strip trailing slash
+        const headers = {
+          "apikey": process.env.SUPABASE_ANON_KEY,
+          "Authorization": `Bearer ${process.env.SUPABASE_ANON_KEY}`,
+          "Content-Type": "application/json",
+          "Prefer": "return=representation"
+        };
+
+        // 1. Check duplicate email using Supabase REST API (GET)
+        const checkRes = await fetch(
+          `${supabaseUrl}/rest/v1/registrations?email=eq.${encodeURIComponent(registrationRecord.email)}`,
+          { method: "GET", headers }
+        );
+
+        if (checkRes.ok) {
+          const matchingRows = await checkRes.json();
+          if (matchingRows.length > 0) {
+            return NextResponse.json(
+              { error: "This email address is already registered." },
+              { status: 409 }
+            );
+          }
+        }
+
+        // 2. Insert record using Supabase REST API (POST)
+        const insertPayload = {
+          id: registrationRecord.id,
+          full_name: registrationRecord.fullName,
+          email: registrationRecord.email,
+          phone: registrationRecord.phone,
+          focus: registrationRecord.focus,
+          church: registrationRecord.church,
+          registered_at: registrationRecord.registeredAt
+        };
+
+        const insertRes = await fetch(`${supabaseUrl}/rest/v1/registrations`, {
+          method: "POST",
+          headers,
+          body: JSON.stringify(insertPayload)
+        });
+
+        if (!insertRes.ok) {
+          const errData = await insertRes.json().catch(() => ({}));
+          console.error("[DATABASE ERROR] Supabase insertion failed:", errData);
+          return NextResponse.json(
+            { error: "Database transaction failed. Please try again." },
+            { status: 500 }
+          );
+        }
+
+        console.log(`[DATABASE] Saved registration to Supabase REST: ${registrationRecord.email}`);
+        return NextResponse.json({
+          success: true,
+          message: "Registration completed successfully.",
+          registration: registrationRecord,
+          database: "Supabase"
+        });
+      } catch (sbError) {
+        console.error("[DATABASE ERROR] Supabase REST connection failed:", sbError);
+        // Fail-safe: let it try other databases or proceed to local file fallback
+      }
+    }
+
+    // --- INTEGRATION: PostreSQL / Supabase Direct (if DATABASE_URL is configured) ---
+    else if (process.env.DATABASE_URL) {
       try {
         const { Pool } = require("pg");
         const pool = new Pool({
@@ -193,7 +259,7 @@ export async function POST(req) {
       }
 
       await saveLocalRegistration(registrationRecord);
-      console.warn(`[DATABASE WARNING] No environment credentials set for Postgres or Firebase. Falling back to local file DB: ${LOCAL_DB_PATH}`);
+      console.warn(`[DATABASE WARNING] No environment credentials set for Supabase, Postgres or Firebase. Falling back to local file DB: ${LOCAL_DB_PATH}`);
       return NextResponse.json({
         success: true,
         message: "Registration completed successfully.",
