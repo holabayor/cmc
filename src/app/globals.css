@@ -1,0 +1,164 @@
+@import "tailwindcss";
+
+:root {
+  /* HSL Color System for Premium Customization */
+  --primary-hue: 251;
+  --secondary-hue: 39;
+  
+  --primary: hsl(var(--primary-hue), 100%, 23%); /* Deep Royal Indigo */
+  --primary-hover: hsl(var(--primary-hue), 70%, 35%);
+  --primary-fixed: hsl(var(--primary-hue), 100%, 94%);
+  --primary-fixed-dim: hsl(var(--primary-hue), 100%, 88%);
+  --primary-container: hsl(var(--primary-hue), 70%, 15%);
+  
+  --secondary: hsl(var(--secondary-hue), 100%, 26%); /* Amber Gold */
+  --secondary-container: hsl(var(--secondary-hue), 99%, 62%);
+  --on-secondary-container: hsl(var(--secondary-hue), 100%, 10%);
+  
+  --background: #fbfbfe;
+  --foreground: #09080f;
+  
+  --surface: rgba(255, 255, 255, 0.7);
+  --surface-border: rgba(255, 255, 255, 0.4);
+  --surface-container: #f1eff8;
+  --surface-container-low: #f8f6fd;
+  --surface-container-high: #e7e4f0;
+  
+  --outline: #77738b;
+  --outline-variant: #ccc8db;
+  
+  --error: #ba1a1a;
+  --error-container: #ffdad6;
+  
+  --card-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.08);
+  --glow-shadow: 0 0 20px rgba(98, 0, 234, 0.2);
+}
+
+.dark {
+  --background: #06050c;
+  --foreground: #f2eff7;
+  
+  --surface: rgba(13, 11, 23, 0.65);
+  --surface-border: rgba(255, 255, 255, 0.08);
+  --surface-container: #110e1a;
+  --surface-container-low: #0c0a13;
+  --surface-container-high: #1c182a;
+  
+  --primary: hsl(var(--primary-hue), 100%, 75%); /* Glowing Lavender */
+  --primary-hover: hsl(var(--primary-hue), 100%, 82%);
+  --primary-container: hsl(var(--primary-hue), 60%, 20%);
+  
+  --outline: #918da3;
+  --outline-variant: #474554;
+  
+  --card-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+  --glow-shadow: 0 0 25px rgba(167, 139, 250, 0.25);
+}
+
+@theme {
+  --color-primary: var(--primary);
+  --color-primary-hover: var(--primary-hover);
+  --color-primary-fixed: var(--primary-fixed);
+  --color-primary-fixed-dim: var(--primary-fixed-dim);
+  --color-primary-container: var(--primary-container);
+  
+  --color-secondary: var(--secondary);
+  --color-secondary-container: var(--secondary-container);
+  --color-on-secondary-container: var(--on-secondary-container);
+  
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-surface: var(--surface);
+  --color-surface-container: var(--surface-container);
+  --color-surface-container-low: var(--surface-container-low);
+  --color-surface-container-high: var(--surface-container-high);
+  
+  --color-outline: var(--outline);
+  --color-outline-variant: var(--outline-variant);
+  
+  --color-error: var(--error);
+  --color-error-container: var(--error-container);
+  
+  --animate-float-slow: float 6s ease-in-out infinite;
+  --animate-pulse-slow: pulse 4s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  --animate-glow: glow 2s ease-in-out infinite alternate;
+}
+
+@keyframes float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-10px); }
+}
+
+@keyframes glow {
+  0% { box-shadow: 0 0 10px rgba(98, 0, 234, 0.15); }
+  100% { box-shadow: 0 0 25px rgba(98, 0, 234, 0.4); }
+}
+
+/* Base resets & customization */
+html {
+  scroll-behavior: smooth;
+  font-family: 'Hanken Grotesk', sans-serif;
+  background-color: var(--background);
+  color: var(--foreground);
+  transition: background-color 0.4s ease, color 0.4s ease;
+}
+
+body {
+  overflow-x: hidden;
+}
+
+/* Premium Custom Scrollbars */
+::-webkit-scrollbar {
+  width: 8px;
+}
+::-webkit-scrollbar-track {
+  background: var(--background);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--outline-variant);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--outline);
+}
+
+/* Custom Glassmorphism Styles */
+.glass-panel {
+  background: var(--surface);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid var(--surface-border);
+  box-shadow: var(--card-shadow);
+  transition: background-color 0.3s ease, border-color 0.3s ease, box-shadow 0.3s ease;
+}
+
+.glass-panel-hover {
+  transition: transform 0.3s cubic-bezier(0.2, 0.8, 0.2, 1), box-shadow 0.3s ease, border-color 0.3s ease;
+}
+.glass-panel-hover:hover {
+  transform: translateY(-4px) scale(1.01);
+  box-shadow: 0 12px 40px 0 rgba(31, 38, 135, 0.15);
+  border-color: var(--primary);
+}
+
+/* Smooth Focus Rings */
+.input-focus {
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
+}
+.input-focus:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(98, 0, 234, 0.2);
+  transform: translateY(-1px);
+}
+
+/* Accessibility: Support High Contrast / Reduced Motion */
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-delay: 0s !important;
+    animation-duration: 0s !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0s !important;
+    scroll-behavior: auto !important;
+    transform: none !important;
+  }
+}
