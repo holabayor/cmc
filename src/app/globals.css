@@ -162,3 +162,71 @@ body {
     transform: none !important;
   }
 }
+
+/* Print styles: Print ONLY the dynamic ticket pass as a single-page card */
+@media print {
+  /* Hides default browser headers/footers and sets margins */
+  @page {
+    size: portrait;
+    margin: 0;
+  }
+
+  /* Force background colors and gradients to print */
+  * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  /* Hide all elements on the entire page */
+  body * {
+    visibility: hidden !important;
+  }
+
+  /* Reveal only the ticket pass card and its child nodes */
+  #digital-ticket-pass,
+  #digital-ticket-pass * {
+    visibility: visible !important;
+  }
+
+  /* Position the card in the dead center of the print canvas */
+  #digital-ticket-pass {
+    display: block !important;
+    position: absolute !important;
+    left: 50% !important;
+    top: 50% !important;
+    transform: translate(-50%, -50%) scale(1.15) !important;
+    width: 380px !important;
+    max-width: 380px !important;
+    margin: 0 !important;
+    padding: 24px !important;
+    background: #0b081c !important; /* Forced brand dark background */
+    color: #ffffff !important;
+    border: 2px dashed rgba(255, 255, 255, 0.25) !important;
+    border-radius: 24px !important;
+    box-shadow: none !important;
+    page-break-inside: avoid !important;
+  }
+
+  /* Style the card cutouts to blend perfectly with the white printed paper background */
+  #digital-ticket-pass div[class*="absolute top-1/2"] {
+    background-color: #ffffff !important;
+    border-color: rgba(11, 8, 28, 0.2) !important;
+  }
+
+  /* Force light and dark modes HSL overrides for ticket elements to ensure readability */
+  #digital-ticket-pass text,
+  #digital-ticket-pass svg,
+  #digital-ticket-pass span,
+  #digital-ticket-pass h4,
+  #digital-ticket-pass p {
+    color: #ffffff !important;
+  }
+
+  #digital-ticket-pass .text-primary {
+    color: #a78bfa !important; /* Glowing lavender accent for the prints */
+  }
+
+  #digital-ticket-pass .text-emerald-500 {
+    color: #10b981 !important; /* Verified badge check */
+  }
+}
