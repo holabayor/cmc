@@ -88,8 +88,8 @@ async function sendConfirmationEmail(record) {
         <body>
           <div class="container">
             <div class="header">
-              <h1>KINGDOM CREATIVES</h1>
-              <p>Creative Create 2026</p>
+              <img src="https://www.churchmedia.online/logo.png" alt="Kingdom Creatives Logo" width="180" style="display: block; margin: 0 auto 10px auto; max-width: 100%; border: none;" />
+              <p style="margin: 0;">Creative Create 2026</p>
             </div>
             <div class="content">
               <h3 class="greeting">Hi ${record.fullName},</h3>

@@ -354,9 +354,13 @@ export default function Home() {
         <div className="flex justify-between items-center max-w-7xl mx-auto px-6 lg:px-12 h-20">
           <div 
             onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
-            className="font-sora text-xl lg:text-2xl font-extrabold tracking-tighter text-primary dark:text-primary cursor-pointer transition-colors"
+            className="flex items-center cursor-pointer select-none"
           >
-            CREATIVE CREATE
+            <img 
+              src="/logo.png" 
+              alt="Kingdom Creatives Logo" 
+              className="h-10 md:h-12 w-auto object-contain"
+            />
           </div>
           
           {/* Desktop Links */}
@@ -801,7 +805,13 @@ export default function Home() {
       <footer className="bg-surface-container border-t transition-colors duration-300 mt-auto">
         <div className="max-w-7xl mx-auto px-6 lg:px-12 py-16 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-8">
           <div className="col-span-1 sm:col-span-2 lg:col-span-1 space-y-4">
-            <span className="font-sora text-lg font-extrabold text-primary">CREATIVE CREATE</span>
+            <div className="flex items-center">
+              <img 
+                src="/logo.png" 
+                alt="Kingdom Creatives Logo" 
+                className="h-10 w-auto object-contain"
+              />
+            </div>
             <p className="text-xs text-outline leading-relaxed max-w-xs">
               © 2026 Kingdom Creatives. All rights reserved. Equipping media ministries with structural creative energy.
             </p>
