@@ -655,7 +655,7 @@ export default function AdminDashboard() {
           className="glass-panel w-full max-w-md rounded-3xl p-8 border border-outline-variant/30 shadow-2xl relative space-y-6 text-center select-none"
         >
           <div className="w-20 h-20 rounded-2xl shrink-0 flex items-center justify-center mx-auto bg-surface-container border border-outline-variant/20 overflow-hidden shadow-lg select-none">
-            <img src="/logo.png" alt="Kingdom Creatives Logo" className="w-full h-full object-contain" />
+            <img src="/logo.png" alt="Kingdom Creatives Logo" className="w-full h-full object-contain dark:invert-0 invert transition-all duration-300" />
           </div>
 
           <div>
@@ -734,7 +734,7 @@ export default function AdminDashboard() {
       <header className="glass-panel border-b border-outline-variant/10 py-4 px-6 sm:px-12 flex flex-col md:flex-row justify-between items-center gap-4 shrink-0 select-none">
         <div className="flex flex-col">
           <div className="relative h-10 overflow-hidden shrink-0">
-            <img src="/logo.png" alt="Kingdom Creatives Logo" className="w-full h-full object-contain" />
+            <img src="/logo.png" alt="Kingdom Creatives Logo" className="w-full h-full object-contain dark:invert-0 invert transition-all duration-300" />
           </div>
           <div>
             {/* <h1 className="font-sora text-sm font-black tracking-tight flex items-center gap-2">
@@ -1798,7 +1798,7 @@ export default function AdminDashboard() {
                             type="text"
                             value={track.id}
                             disabled
-                            className="bg-[#0c0a1a] rounded-xl border border-outline-variant/10 px-3.5 py-2 text-foreground/60 font-mono text-xs cursor-not-allowed select-all"
+                            className="bg-surface-container-high/40 dark:bg-[#0c0a1a] rounded-xl border border-outline-variant/15 px-3.5 py-2 text-foreground/60 font-mono text-xs cursor-not-allowed select-all"
                           />
                         </div>
                         <div className="flex flex-col space-y-1">
@@ -1905,7 +1905,7 @@ export default function AdminDashboard() {
                       setNewTrackSlug("");
                       showToast(`Added track: ${newTrackName}. Click Save below to apply.`);
                     }}
-                    className="w-full bg-[#1b1933] border border-primary/20 hover:bg-primary/10 hover:border-primary text-primary font-bold py-3 px-5 rounded-2xl transition-all flex items-center justify-center space-x-1.5"
+                    className="w-full bg-primary/5 hover:bg-primary/10 dark:bg-[#1b1933] dark:hover:bg-primary/10 border border-primary/20 hover:border-primary text-primary font-bold py-3 px-5 rounded-2xl transition-all flex items-center justify-center space-x-1.5"
                   >
                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" />

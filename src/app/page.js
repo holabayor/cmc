@@ -391,7 +391,7 @@ export default function Home() {
             <img 
               src="/logo.png" 
               alt="Kingdom Creatives Logo" 
-              className="h-10 md:h-12 w-auto object-contain"
+              className="h-10 md:h-12 w-auto object-contain dark:invert-0 invert transition-all duration-300"
             />
           </div>
           
@@ -841,7 +841,7 @@ export default function Home() {
               <img 
                 src="/logo.png" 
                 alt="Kingdom Creatives Logo" 
-                className="h-10 w-auto object-contain"
+                className="h-10 w-auto object-contain dark:invert-0 invert transition-all duration-300"
               />
             </div>
             <p className="text-xs text-outline leading-relaxed max-w-xs">
@@ -982,8 +982,8 @@ export default function Home() {
               {/* DYNAMIC DIGITAL TICKET PASS */}
               <div id="digital-ticket-pass" className="relative border-2 border-dashed border-primary/30 bg-gradient-to-br from-[#120f26]/85 to-[#0b081c]/90 rounded-3xl p-5 shadow-2xl overflow-hidden mt-4 text-left">
                 {/* Pass Cutout circles */}
-                <div className="absolute top-1/2 -left-3.5 w-6 h-6 rounded-full bg-[#06050c] transform -translate-y-1/2 border-r border-dashed border-primary/20"></div>
-                <div className="absolute top-1/2 -right-3.5 w-6 h-6 rounded-full bg-[#06050c] transform -translate-y-1/2 border-l border-dashed border-primary/20"></div>
+                <div className="absolute top-1/2 -left-3.5 w-6 h-6 rounded-full bg-background transform -translate-y-1/2 border-r border-dashed border-primary/20"></div>
+                <div className="absolute top-1/2 -right-3.5 w-6 h-6 rounded-full bg-background transform -translate-y-1/2 border-l border-dashed border-primary/20"></div>
 
                 {/* Focus track specific visual halo */}
                 {recentRegistration.focus && (
