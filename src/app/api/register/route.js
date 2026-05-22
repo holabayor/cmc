@@ -40,6 +40,19 @@ const sanitizeEnvVar = (val) => {
   return cleaned;
 };
 
+// Helper to sanitize private keys robustly for serverless and multiline environments (handles JSON escaped quotes, carriage returns, and newlines)
+const sanitizePrivateKey = (val) => {
+  if (!val) return "";
+  let cleaned = val.trim();
+  // Strip any surrounding escaped or unescaped quotes (e.g. ", ', \", \')
+  cleaned = cleaned.replace(/^\\?['"]|\\?['"]$/g, "");
+  // Replace escaped newlines
+  cleaned = cleaned.replace(/\\n/g, "\n");
+  // Remove carriage returns
+  cleaned = cleaned.replace(/\r/g, "");
+  return cleaned.trim();
+};
+
 // Helper for local dev fallback database operations
 async function getLocalRegistrations() {
   try {
@@ -246,7 +259,7 @@ export async function POST(req) {
         if (!admin.apps.length) {
           const projectId = sanitizeEnvVar(process.env.FIREBASE_PROJECT_ID);
           const clientEmail = sanitizeEnvVar(process.env.FIREBASE_CLIENT_EMAIL);
-          const privateKey = sanitizeEnvVar(process.env.FIREBASE_PRIVATE_KEY).replace(/\\n/g, "\n");
+          const privateKey = sanitizePrivateKey(process.env.FIREBASE_PRIVATE_KEY);
           admin.initializeApp({
             credential: admin.credential.cert({
               projectId,
@@ -504,7 +517,7 @@ export async function POST(req) {
         if (!admin.apps.length) {
           const projectId = sanitizeEnvVar(process.env.FIREBASE_PROJECT_ID);
           const clientEmail = sanitizeEnvVar(process.env.FIREBASE_CLIENT_EMAIL);
-          const privateKey = sanitizeEnvVar(process.env.FIREBASE_PRIVATE_KEY).replace(/\\n/g, "\n");
+          const privateKey = sanitizePrivateKey(process.env.FIREBASE_PRIVATE_KEY);
           admin.initializeApp({
             credential: admin.credential.cert({
               projectId,
@@ -610,7 +623,7 @@ export async function GET(req) {
         if (!admin.apps.length) {
           const projectId = sanitizeEnvVar(process.env.FIREBASE_PROJECT_ID);
           const clientEmail = sanitizeEnvVar(process.env.FIREBASE_CLIENT_EMAIL);
-          const privateKey = sanitizeEnvVar(process.env.FIREBASE_PRIVATE_KEY).replace(/\\n/g, "\n");
+          const privateKey = sanitizePrivateKey(process.env.FIREBASE_PRIVATE_KEY);
           admin.initializeApp({
             credential: admin.credential.cert({
               projectId,

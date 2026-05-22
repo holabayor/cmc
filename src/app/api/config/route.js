@@ -34,13 +34,26 @@ const sanitizeEnvVar = (val) => {
   return cleaned;
 };
 
+// Helper to sanitize private keys robustly for serverless and multiline environments (handles JSON escaped quotes, carriage returns, and newlines)
+const sanitizePrivateKey = (val) => {
+  if (!val) return "";
+  let cleaned = val.trim();
+  // Strip any surrounding escaped or unescaped quotes (e.g. ", ', \", \')
+  cleaned = cleaned.replace(/^\\?['"]|\\?['"]$/g, "");
+  // Replace escaped newlines
+  cleaned = cleaned.replace(/\\n/g, "\n");
+  // Remove carriage returns
+  cleaned = cleaned.replace(/\r/g, "");
+  return cleaned.trim();
+};
+
 // Initialize Firebase Admin SDK
 function getFirebaseAdmin() {
   const admin = require("firebase-admin");
   if (!admin.apps.length) {
     const projectId = sanitizeEnvVar(process.env.FIREBASE_PROJECT_ID);
     const clientEmail = sanitizeEnvVar(process.env.FIREBASE_CLIENT_EMAIL);
-    const privateKey = sanitizeEnvVar(process.env.FIREBASE_PRIVATE_KEY).replace(/\\n/g, "\n");
+    const privateKey = sanitizePrivateKey(process.env.FIREBASE_PRIVATE_KEY);
     admin.initializeApp({
       credential: admin.credential.cert({
         projectId,
@@ -337,38 +350,55 @@ export async function POST(req) {
       focusTracks: Array.isArray(focusTracks) ? focusTracks : DEFAULT_CONFIG.focusTracks
     };
 
+    let saved = false;
+    let databaseBackend = "";
+
     // --- SAVE: Firebase Firestore ---
     if (process.env.FIREBASE_PROJECT_ID && process.env.FIREBASE_CLIENT_EMAIL && process.env.FIREBASE_PRIVATE_KEY) {
-      const admin = getFirebaseAdmin();
-      const db = admin.firestore();
-      await db.collection("config").doc("landingPage").set(updatedConfig);
-      console.log("[DATABASE] Firebase Config updated by Admin");
+      try {
+        const admin = getFirebaseAdmin();
+        const db = admin.firestore();
+        await db.collection("config").doc("landingPage").set(updatedConfig);
+        saved = true;
+        databaseBackend = "Firebase";
+        console.log("[DATABASE] Firebase Config updated by Admin");
+      } catch (fbError) {
+        console.error("[DATABASE ERROR] Firebase Config save failed, trying fallback:", fbError);
+      }
     }
 
     // --- SAVE: PostgreSQL / Supabase ---
-    else if (process.env.DATABASE_URL) {
-      const { Pool } = require("pg");
-      const pool = new Pool({
-        connectionString: process.env.DATABASE_URL,
-        ssl: { rejectUnauthorized: false }
-      });
-      await pool.query(
-        "INSERT INTO configurations (key, value) VALUES ('landingPage', $1) ON CONFLICT (key) DO UPDATE SET value = $1",
-        [JSON.stringify(updatedConfig)]
-      );
-      await pool.end();
-      console.log("[DATABASE] PostgreSQL Config updated by Admin");
+    if (!saved && process.env.DATABASE_URL) {
+      try {
+        const { Pool } = require("pg");
+        const pool = new Pool({
+          connectionString: process.env.DATABASE_URL,
+          ssl: { rejectUnauthorized: false }
+        });
+        await pool.query(
+          "INSERT INTO configurations (key, value) VALUES ('landingPage', $1) ON CONFLICT (key) DO UPDATE SET value = $1",
+          [JSON.stringify(updatedConfig)]
+        );
+        await pool.end();
+        saved = true;
+        databaseBackend = "PostgreSQL";
+        console.log("[DATABASE] PostgreSQL Config updated by Admin");
+      } catch (pgError) {
+        console.error("[DATABASE ERROR] PostgreSQL Config save failed, trying fallback:", pgError);
+      }
     }
 
     // --- SAVE: Local JSON Fallback ---
-    else {
+    if (!saved) {
       try {
         await fs.writeFile(CONFIG_PATH, JSON.stringify(updatedConfig, null, 2), "utf-8");
+        saved = true;
+        databaseBackend = "LocalJSON";
         console.log("[DATABASE] Local config JSON updated by Admin");
       } catch (writeErr) {
         console.error("[DATABASE ERROR] Failed to write local config JSON:", writeErr);
         return NextResponse.json(
-          { error: `Failed to persist configuration locally: ${writeErr.message}` },
+          { error: `Failed to persist configuration across all fallback databases: ${writeErr.message}` },
           { status: 500 }
         );
       }
@@ -377,6 +407,7 @@ export async function POST(req) {
     return NextResponse.json({
       success: true,
       message: "Configuration successfully saved.",
+      database: databaseBackend,
       config: updatedConfig
     });
 

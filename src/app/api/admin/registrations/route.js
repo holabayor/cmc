@@ -31,13 +31,26 @@ const sanitizeEnvVar = (val) => {
   return cleaned;
 };
 
+// Helper to sanitize private keys robustly for serverless and multiline environments (handles JSON escaped quotes, carriage returns, and newlines)
+const sanitizePrivateKey = (val) => {
+  if (!val) return "";
+  let cleaned = val.trim();
+  // Strip any surrounding escaped or unescaped quotes (e.g. ", ', \", \')
+  cleaned = cleaned.replace(/^\\?['"]|\\?['"]$/g, "");
+  // Replace escaped newlines
+  cleaned = cleaned.replace(/\\n/g, "\n");
+  // Remove carriage returns
+  cleaned = cleaned.replace(/\r/g, "");
+  return cleaned.trim();
+};
+
 // Initialize Firebase Admin SDK
 function getFirebaseAdmin() {
   const admin = require("firebase-admin");
   if (!admin.apps.length) {
     const projectId = sanitizeEnvVar(process.env.FIREBASE_PROJECT_ID);
     const clientEmail = sanitizeEnvVar(process.env.FIREBASE_CLIENT_EMAIL);
-    const privateKey = sanitizeEnvVar(process.env.FIREBASE_PRIVATE_KEY).replace(/\\n/g, "\n");
+    const privateKey = sanitizePrivateKey(process.env.FIREBASE_PRIVATE_KEY);
     admin.initializeApp({
       credential: admin.credential.cert({
         projectId,
@@ -164,69 +177,92 @@ export async function PATCH(req) {
     }
 
     const checkedInAt = checkedIn ? new Date().toISOString() : null;
+    let updated = false;
+    let databaseBackend = "";
 
     // --- UPDATE: Firebase Firestore ---
     if (process.env.FIREBASE_PROJECT_ID && process.env.FIREBASE_CLIENT_EMAIL && process.env.FIREBASE_PRIVATE_KEY) {
-      const admin = getFirebaseAdmin();
-      const db = admin.firestore();
-      const attendeeRef = db.collection("registrations").doc(id);
-      const doc = await attendeeRef.get();
-      if (!doc.exists) {
-        return NextResponse.json({ error: "Registration record not found." }, { status: 444 });
+      try {
+        const admin = getFirebaseAdmin();
+        const db = admin.firestore();
+        const attendeeRef = db.collection("registrations").doc(id);
+        const doc = await attendeeRef.get();
+        if (doc.exists) {
+          await attendeeRef.update({
+            checkedIn,
+            checkedInAt
+          });
+          updated = true;
+          databaseBackend = "Firebase";
+          console.log(`[DATABASE] Firebase: Check-in toggled for ID ${id} to ${checkedIn}`);
+        } else {
+          console.warn(`[DATABASE WARNING] Firebase: Registration record not found for ID ${id}`);
+        }
+      } catch (fbError) {
+        console.error("[DATABASE ERROR] Firebase check-in update failed, trying fallback:", fbError);
       }
-      await attendeeRef.update({
-        checkedIn,
-        checkedInAt
-      });
-      console.log(`[DATABASE] Firebase: Check-in toggled for ID ${id} to ${checkedIn}`);
     }
 
     // --- UPDATE: PostgreSQL / Supabase ---
-    else if (process.env.DATABASE_URL) {
-      const { Pool } = require("pg");
-      const pool = new Pool({
-        connectionString: process.env.DATABASE_URL,
-        ssl: { rejectUnauthorized: false }
-      });
-      
-      // Ensure checked_in and checked_in_at columns exist
-      await pool.query(`
-        ALTER TABLE registrations 
-        ADD COLUMN IF NOT EXISTS checked_in BOOLEAN DEFAULT FALSE,
-        ADD COLUMN IF NOT EXISTS checked_in_at TIMESTAMP DEFAULT NULL
-      `);
+    if (!updated && process.env.DATABASE_URL) {
+      try {
+        const { Pool } = require("pg");
+        const pool = new Pool({
+          connectionString: process.env.DATABASE_URL,
+          ssl: { rejectUnauthorized: false }
+        });
+        
+        // Ensure checked_in and checked_in_at columns exist
+        await pool.query(`
+          ALTER TABLE registrations 
+          ADD COLUMN IF NOT EXISTS checked_in BOOLEAN DEFAULT FALSE,
+          ADD COLUMN IF NOT EXISTS checked_in_at TIMESTAMP DEFAULT NULL
+        `);
 
-      const res = await pool.query(
-        "UPDATE registrations SET checked_in = $1, checked_in_at = $2 WHERE id = $3",
-        [checkedIn, checkedInAt, id]
-      );
+        const res = await pool.query(
+          "UPDATE registrations SET checked_in = $1, checked_in_at = $2 WHERE id = $3",
+          [checkedIn, checkedInAt, id]
+        );
 
-      if (res.rowCount === 0) {
+        if (res.rowCount > 0) {
+          updated = true;
+          databaseBackend = "PostgreSQL";
+          console.log(`[DATABASE] Postgres: Check-in toggled for ID ${id} to ${checkedIn}`);
+        } else {
+          console.warn(`[DATABASE WARNING] Postgres: Registration record not found for ID ${id}`);
+        }
         await pool.end();
-        return NextResponse.json({ error: "Registration record not found." }, { status: 444 });
+      } catch (pgError) {
+        console.error("[DATABASE ERROR] PostgreSQL check-in update failed, trying fallback:", pgError);
       }
-      await pool.end();
-      console.log(`[DATABASE] Postgres: Check-in toggled for ID ${id} to ${checkedIn}`);
     }
 
     // --- UPDATE: Local JSON Fallback ---
-    else {
-      const registrations = await getLocalRegistrations();
-      const attendeeIndex = registrations.findIndex(r => r.id === id);
-      if (attendeeIndex === -1) {
-        return NextResponse.json({ error: "Registration record not found." }, { status: 444 });
-      }
+    if (!updated) {
+      try {
+        const registrations = await getLocalRegistrations();
+        const attendeeIndex = registrations.findIndex(r => r.id === id);
+        if (attendeeIndex === -1) {
+          return NextResponse.json({ error: "Registration record not found across all databases." }, { status: 444 });
+        }
 
-      registrations[attendeeIndex].checkedIn = checkedIn;
-      registrations[attendeeIndex].checkedInAt = checkedInAt;
-      
-      await saveLocalRegistrations(registrations);
-      console.log(`[DATABASE] Local JSON: Check-in toggled for ID ${id} to ${checkedIn}`);
+        registrations[attendeeIndex].checkedIn = checkedIn;
+        registrations[attendeeIndex].checkedInAt = checkedInAt;
+        
+        await saveLocalRegistrations(registrations);
+        updated = true;
+        databaseBackend = "LocalJSON";
+        console.log(`[DATABASE] Local JSON: Check-in toggled for ID ${id} to ${checkedIn}`);
+      } catch (localError) {
+        console.error("[DATABASE ERROR] Local JSON check-in update failed:", localError);
+        return NextResponse.json({ error: "Failed to update check-in status across all fallback options." }, { status: 500 });
+      }
     }
 
     return NextResponse.json({
       success: true,
       message: checkedIn ? "Check-in completed successfully." : "Check-in reverted successfully.",
+      database: databaseBackend,
       attendee: { id, checkedIn, checkedInAt }
     });
 
@@ -253,56 +289,80 @@ export async function DELETE(req) {
       return NextResponse.json({ error: "Attendee ID is required." }, { status: 400 });
     }
 
+    let deleted = false;
+    let databaseBackend = "";
+
     // --- DELETE: Firebase Firestore ---
     if (process.env.FIREBASE_PROJECT_ID && process.env.FIREBASE_CLIENT_EMAIL && process.env.FIREBASE_PRIVATE_KEY) {
-      const admin = getFirebaseAdmin();
-      const db = admin.firestore();
-      const attendeeRef = db.collection("registrations").doc(id);
-      const doc = await attendeeRef.get();
-      if (!doc.exists) {
-        return NextResponse.json({ error: "Registration record not found." }, { status: 444 });
+      try {
+        const admin = getFirebaseAdmin();
+        const db = admin.firestore();
+        const attendeeRef = db.collection("registrations").doc(id);
+        const doc = await attendeeRef.get();
+        if (doc.exists) {
+          await attendeeRef.delete();
+          deleted = true;
+          databaseBackend = "Firebase";
+          console.log(`[DATABASE] Firebase: Registration deleted for ID ${id}`);
+        } else {
+          console.warn(`[DATABASE WARNING] Firebase: Registration record not found for deletion ID ${id}`);
+        }
+      } catch (fbError) {
+        console.error("[DATABASE ERROR] Firebase registration deletion failed, trying fallback:", fbError);
       }
-      await attendeeRef.delete();
-      console.log(`[DATABASE] Firebase: Registration deleted for ID ${id}`);
     }
 
     // --- DELETE: PostgreSQL / Supabase ---
-    else if (process.env.DATABASE_URL) {
-      const { Pool } = require("pg");
-      const pool = new Pool({
-        connectionString: process.env.DATABASE_URL,
-        ssl: { rejectUnauthorized: false }
-      });
-      
-      const res = await pool.query(
-        "DELETE FROM registrations WHERE id = $1",
-        [id]
-      );
+    if (!deleted && process.env.DATABASE_URL) {
+      try {
+        const { Pool } = require("pg");
+        const pool = new Pool({
+          connectionString: process.env.DATABASE_URL,
+          ssl: { rejectUnauthorized: false }
+        });
+        
+        const res = await pool.query(
+          "DELETE FROM registrations WHERE id = $1",
+          [id]
+        );
 
-      if (res.rowCount === 0) {
+        if (res.rowCount > 0) {
+          deleted = true;
+          databaseBackend = "PostgreSQL";
+          console.log(`[DATABASE] Postgres: Registration deleted for ID ${id}`);
+        } else {
+          console.warn(`[DATABASE WARNING] Postgres: Registration record not found for deletion ID ${id}`);
+        }
         await pool.end();
-        return NextResponse.json({ error: "Registration record not found." }, { status: 444 });
+      } catch (pgError) {
+        console.error("[DATABASE ERROR] PostgreSQL registration deletion failed, trying fallback:", pgError);
       }
-      await pool.end();
-      console.log(`[DATABASE] Postgres: Registration deleted for ID ${id}`);
     }
 
     // --- DELETE: Local JSON Fallback ---
-    else {
-      const registrations = await getLocalRegistrations();
-      const attendeeIndex = registrations.findIndex(r => r.id === id);
-      if (attendeeIndex === -1) {
-        return NextResponse.json({ error: "Registration record not found." }, { status: 444 });
-      }
+    if (!deleted) {
+      try {
+        const registrations = await getLocalRegistrations();
+        const attendeeIndex = registrations.findIndex(r => r.id === id);
+        if (attendeeIndex === -1) {
+          return NextResponse.json({ error: "Registration record not found across all databases." }, { status: 444 });
+        }
 
-      registrations.splice(attendeeIndex, 1);
-      await saveLocalRegistrations(registrations);
-      console.log(`[DATABASE] Local JSON: Registration deleted for ID ${id}`);
+        registrations.splice(attendeeIndex, 1);
+        await saveLocalRegistrations(registrations);
+        deleted = true;
+        databaseBackend = "LocalJSON";
+        console.log(`[DATABASE] Local JSON: Registration deleted for ID ${id}`);
+      } catch (localError) {
+        console.error("[DATABASE ERROR] Local JSON registration deletion failed:", localError);
+        return NextResponse.json({ error: "Failed to delete participant across all fallback options." }, { status: 500 });
+      }
     }
 
     return NextResponse.json({
       success: true,
       message: "Registration deleted successfully.",
+      database: databaseBackend,
       id
     });
 
