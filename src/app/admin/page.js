@@ -21,6 +21,10 @@ export default function AdminDashboard() {
   const [searchQuery, setSearchQuery] = useState("");
   const [trackFilter, setTrackFilter] = useState("all");
 
+  // Dynamic Custom Focus Tracks Editor States
+  const [newTrackName, setNewTrackName] = useState("");
+  const [newTrackSlug, setNewTrackSlug] = useState("");
+
   // Camera QR scanner state
   const [scannerScriptLoaded, setScannerScriptLoaded] = useState(false);
   const [scannerActive, setScannerActive] = useState(false);
@@ -41,6 +45,76 @@ export default function AdminDashboard() {
 
   // Theme support
   const [darkMode, setDarkMode] = useState(false);
+
+  // Dynamic customized focus tracks mapping or fallbacks
+  const focusTracks = config?.focusTracks || [
+    { id: "video", name: "Video Production" },
+    { id: "audio", name: "Audio & Sound" },
+    { id: "design", name: "Graphic Design" },
+    { id: "social", name: "Social Media" },
+    { id: "content", name: "Content Strategy" }
+  ];
+
+  // Instantly update the custom focus tracks in local state
+  const handleUpdateFocusTracksState = (updatedTracks) => {
+    setConfig((prev) => ({
+      ...prev,
+      focusTracks: updatedTracks,
+    }));
+  };
+
+  // Client-side HTML5 Canvas Image Resizer & Compressor (limits headshot sizes to ~15KB - 30KB JPEGs)
+  const compressImage = (file) => {
+    return new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        const img = new Image();
+        img.onload = () => {
+          const canvas = document.createElement("canvas");
+          let width = img.width;
+          let height = img.height;
+          const max_size = 300;
+
+          if (width > height) {
+            if (width > max_size) {
+              height *= max_size / width;
+              width = max_size;
+            }
+          } else {
+            if (height > max_size) {
+              width *= max_size / height;
+              height = max_size;
+            }
+          }
+
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext("2d");
+          ctx.drawImage(img, 0, 0, width, height);
+
+          canvas.toBlob(
+            (blob) => {
+              if (blob) {
+                const compressedFile = new File([blob], file.name.replace(/\.[^/.]+$/, "") + ".jpg", {
+                  type: "image/jpeg",
+                  lastModified: Date.now()
+                });
+                resolve(compressedFile);
+              } else {
+                resolve(file);
+              }
+            },
+            "image/jpeg",
+            0.85
+          );
+        };
+        img.onerror = () => resolve(file);
+        img.src = event.target.result;
+      };
+      reader.onerror = () => resolve(file);
+      reader.readAsDataURL(file);
+    });
+  };
 
   // Load scanner library CDN dynamically, synchronize theme preference, and load authorization state
   useEffect(() => {
@@ -94,10 +168,13 @@ export default function AdminDashboard() {
     }
 
     setUploadingImage(true);
-    const formData = new FormData();
-    formData.append("file", file);
+    showToast("Compressing image...");
 
     try {
+      const compressedFile = await compressImage(file);
+      const formData = new FormData();
+      formData.append("file", compressedFile);
+
       const res = await fetch("/api/admin/upload", {
         method: "POST",
         headers: {
@@ -109,12 +186,12 @@ export default function AdminDashboard() {
       const data = await res.json();
       if (res.ok && data.success) {
         setSpeakerImageUrl(data.url);
-        showToast("Image uploaded successfully!");
+        showToast("Image compressed and uploaded successfully!");
       } else {
         showToast(data.error || "Failed to upload image.", "error");
       }
     } catch (err) {
-      showToast("Failed to upload image.", "error");
+      showToast("Failed to process or upload image.", "error");
     } finally {
       setUploadingImage(false);
     }
@@ -543,14 +620,13 @@ export default function AdminDashboard() {
     return matchesSearch && matchesTrack;
   });
 
-  // Calculate live counters
+  // Calculate live counters dynamically based on current focus tracks
   const totalSpots = config?.registrationLimit || 100;
   const countCheckedIn = registrations.filter(r => r.checkedIn).length;
-  const countVideo = registrations.filter(r => r.focus === "video").length;
-  const countAudio = registrations.filter(r => r.focus === "audio").length;
-  const countDesign = registrations.filter(r => r.focus === "design").length;
-  const countSocial = registrations.filter(r => r.focus === "social").length;
-  const countContent = registrations.filter(r => r.focus === "content").length;
+  const trackCounts = focusTracks.reduce((acc, track) => {
+    acc[track.id] = registrations.filter(r => r.focus === track.id).length;
+    return acc;
+  }, {});
   const checkinPercentage = registrations.length > 0 ? ((countCheckedIn / registrations.length) * 100).toFixed(1) : 0;
 
   if (isLoading) {
@@ -759,9 +835,12 @@ export default function AdminDashboard() {
           <div className="glass-panel p-5 rounded-2xl border border-outline-variant/30 text-left relative overflow-hidden shadow">
             <div className="absolute top-0 right-0 w-12 h-12 bg-cyan-500 rounded-full filter blur-[35px] opacity-25"></div>
             <span className="text-[10px] text-outline font-black uppercase tracking-wider block">Media Tracks</span>
-            <span className="font-sora text-3xl font-black text-cyan-600 dark:text-cyan-400 mt-1 block">5</span>
-            <span className="text-[10px] text-foreground/70 block mt-2">
-              Video: {countVideo} | Audio: {countAudio} | Design: {countDesign}
+            <span className="font-sora text-3xl font-black text-cyan-600 dark:text-cyan-400 mt-1 block">
+              {focusTracks.length}
+            </span>
+            <span className="text-[10px] text-foreground/70 block mt-2 truncate">
+              {focusTracks.slice(0, 3).map(t => `${t.name.split(" ")[0]}: ${trackCounts[t.id] || 0}`).join(" | ")}
+              {focusTracks.length > 3 ? "..." : ""}
             </span>
           </div>
 
@@ -804,21 +883,11 @@ export default function AdminDashboard() {
                   <option value="all" className="bg-surface-container text-foreground">
                     All Tracks
                   </option>
-                  <option value="video" className="bg-surface-container text-foreground">
-                    Video
-                  </option>
-                  <option value="audio" className="bg-surface-container text-foreground">
-                    Audio
-                  </option>
-                  <option value="design" className="bg-surface-container text-foreground">
-                    Design
-                  </option>
-                  <option value="social" className="bg-surface-container text-foreground">
-                    Social
-                  </option>
-                  <option value="content" className="bg-surface-container text-foreground">
-                    Content
-                  </option>
+                  {focusTracks.map(track => (
+                    <option key={track.id} value={track.id} className="bg-surface-container text-foreground">
+                      {track.name}
+                    </option>
+                  ))}
                 </select>
               </div>
 
@@ -1210,21 +1279,11 @@ export default function AdminDashboard() {
                             className="input-focus rounded-xl border border-outline-variant/30 bg-surface-container-low px-3.5 py-2.5 outline-none text-foreground focus:border-primary text-xs font-bold"
                             required
                           >
-                            <option value="video" className="bg-surface-container text-foreground">
-                              Video
-                            </option>
-                            <option value="audio" className="bg-surface-container text-foreground">
-                              Audio
-                            </option>
-                            <option value="design" className="bg-surface-container text-foreground">
-                              Design
-                            </option>
-                            <option value="social" className="bg-surface-container text-foreground">
-                              Social
-                            </option>
-                            <option value="content" className="bg-surface-container text-foreground">
-                              Content
-                            </option>
+                            {focusTracks.map(track => (
+                              <option key={track.id} value={track.id} className="bg-surface-container text-foreground">
+                                {track.name}
+                              </option>
+                            ))}
                           </select>
                         </div>
                         <div className="flex flex-col space-y-2">
@@ -1711,6 +1770,173 @@ export default function AdminDashboard() {
                 </button>
               </div>
             </form>
+
+            {/* Custom Focus Tracks Settings */}
+            <div className="pt-6">
+              <h2 className="font-sora text-xl font-extrabold text-foreground">🎨 Customize Media Focus Tracks</h2>
+              <p className="font-hanken text-xs text-foreground/75 mt-1">
+                Dynamically add, edit, or delete the learning tracks available for registration and speaker assignments.
+              </p>
+            </div>
+
+            <div className="glass-panel p-6 sm:p-8 rounded-3xl border border-outline-variant/30 space-y-6 shadow-xl text-xs font-semibold">
+              {/* Existing Focus Tracks list */}
+              <div className="space-y-4">
+                <span className="text-[10px] text-outline font-bold uppercase tracking-wider block">
+                  Active Registration Focus Tracks
+                </span>
+                <div className="grid grid-cols-1 gap-3">
+                  {focusTracks.map((track, idx) => (
+                    <div
+                      key={track.id}
+                      className="flex items-center space-x-3 bg-surface-container-low p-3.5 rounded-2xl border border-outline-variant/15 hover:border-primary/20 transition-all duration-300"
+                    >
+                      <div className="flex-1 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div className="flex flex-col space-y-1">
+                          <label className="text-[10px] text-outline font-bold">TRACK SLUG (ID)</label>
+                          <input
+                            type="text"
+                            value={track.id}
+                            disabled
+                            className="bg-[#0c0a1a] rounded-xl border border-outline-variant/10 px-3.5 py-2 text-foreground/60 font-mono text-xs cursor-not-allowed select-all"
+                          />
+                        </div>
+                        <div className="flex flex-col space-y-1">
+                          <label className="text-[10px] text-outline font-bold">DISPLAY NAME</label>
+                          <input
+                            type="text"
+                            value={track.name}
+                            onChange={(e) => {
+                              const newTracks = focusTracks.map((t, i) =>
+                                i === idx ? { ...t, name: e.target.value } : t
+                              );
+                              handleUpdateFocusTracksState(newTracks);
+                            }}
+                            className="bg-surface-container rounded-xl border border-outline-variant/30 px-3.5 py-2 outline-none text-foreground focus:border-primary text-xs font-bold"
+                            placeholder="e.g. Video Production"
+                          />
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const newTracks = focusTracks.filter((_, i) => i !== idx);
+                          handleUpdateFocusTracksState(newTracks);
+                          showToast(`Removed track: ${track.name}. Click Save below to apply.`);
+                        }}
+                        className="p-3 border border-rose-500/20 bg-rose-500/10 text-rose-500 hover:bg-rose-500/20 rounded-xl transition-all self-end shrink-0"
+                        title="Delete Track"
+                      >
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth={2}
+                            d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                          />
+                        </svg>
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Add New Track Input Row */}
+              <div className="border-t border-outline-variant/10 pt-5 space-y-4">
+                <span className="text-[10px] text-outline font-bold uppercase tracking-wider block">
+                  Add New Focus Track
+                </span>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 items-end">
+                  <div className="flex flex-col space-y-2">
+                    <label htmlFor="newTrackName" className="text-[10px] text-outline font-bold">
+                      TRACK DISPLAY NAME
+                    </label>
+                    <input
+                      type="text"
+                      id="newTrackName"
+                      value={newTrackName}
+                      onChange={(e) => {
+                        setNewTrackName(e.target.value);
+                        // Generate dynamic slug: lowercase alphanumeric, dashes instead of spaces
+                        const generatedSlug = e.target.value
+                          .toLowerCase()
+                          .replace(/[^a-z0-9\s-]/g, "")
+                          .trim()
+                          .replace(/\s+/g, "-");
+                        setNewTrackSlug(generatedSlug);
+                      }}
+                      className="input-focus rounded-2xl border border-outline-variant/30 bg-surface-container-low px-4 py-3 outline-none text-foreground focus:border-primary text-xs font-bold"
+                      placeholder="e.g. Visual Effects"
+                    />
+                  </div>
+                  <div className="flex flex-col space-y-2">
+                    <label htmlFor="newTrackSlug" className="text-[10px] text-outline font-bold">
+                      GENERATED TRACK SLUG / KEY
+                    </label>
+                    <input
+                      type="text"
+                      id="newTrackSlug"
+                      value={newTrackSlug}
+                      onChange={(e) => setNewTrackSlug(e.target.value.toLowerCase().replace(/\s+/g, "-"))}
+                      className="input-focus rounded-2xl border border-outline-variant/30 bg-surface-container-low px-4 py-3 outline-none text-foreground focus:border-primary text-xs font-mono font-bold"
+                      placeholder="generated-slug"
+                    />
+                  </div>
+                </div>
+                <div className="pt-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!newTrackName.trim()) {
+                        showToast("Please enter a valid track name.", "error");
+                        return;
+                      }
+                      if (!newTrackSlug.trim()) {
+                        showToast("Please enter or generate a valid track key.", "error");
+                        return;
+                      }
+                      if (focusTracks.some((t) => t.id === newTrackSlug)) {
+                        showToast("A track with this key already exists.", "error");
+                        return;
+                      }
+                      const updatedTracks = [...focusTracks, { id: newTrackSlug, name: newTrackName.trim() }];
+                      handleUpdateFocusTracksState(updatedTracks);
+                      setNewTrackName("");
+                      setNewTrackSlug("");
+                      showToast(`Added track: ${newTrackName}. Click Save below to apply.`);
+                    }}
+                    className="w-full bg-[#1b1933] border border-primary/20 hover:bg-primary/10 hover:border-primary text-primary font-bold py-3 px-5 rounded-2xl transition-all flex items-center justify-center space-x-1.5"
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" />
+                    </svg>
+                    <span>Add Track Option</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Master Save Button for Focus Tracks */}
+              <div className="pt-4 border-t border-outline-variant/10 flex justify-end">
+                <button
+                  type="button"
+                  onClick={async () => {
+                    const payload = { ...config, focusTracks };
+                    await pushConfigUpdate(payload, "Focus track customizations saved successfully!");
+                  }}
+                  className="w-full sm:w-auto bg-primary text-background hover:bg-primary-hover font-bold py-3.5 px-8 rounded-2xl transition-all shadow-glow flex items-center justify-center space-x-2"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2.5}
+                      d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4"
+                    />
+                  </svg>
+                  <span>Save Custom Focus Tracks</span>
+                </button>
+              </div>
+            </div>
           </div>
         )}
 

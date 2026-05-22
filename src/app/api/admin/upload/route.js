@@ -31,27 +31,51 @@ export async function POST(req) {
       return NextResponse.json({ error: "File must be a valid image." }, { status: 400 });
     }
 
-    // 3. Prepare paths
-    const uploadDir = path.join(process.cwd(), "public", "uploads");
-    await fs.mkdir(uploadDir, { recursive: true });
-
-    // Clean up file name to prevent path traversal & formatting issues
-    const rawName = file.name.replace(/[^a-zA-Z0-9.-]/g, "_");
-    const uniqueName = `speaker_${Date.now()}_${rawName}`;
-    const filePath = path.join(uploadDir, uniqueName);
-
-    // 4. Save file to disk
+    // 3. Save file or fallback to Base64
     const arrayBuffer = await file.arrayBuffer();
     const buffer = Buffer.from(arrayBuffer);
-    await fs.writeFile(filePath, buffer);
 
-    console.log(`[FILE UPLOAD] Saved speaker photo: /uploads/${uniqueName}`);
+    // If Vercel is detected, we can immediately return the Base64 representation to save filesystem attempts
+    const isVercel = process.env.VERCEL === "1" || !!process.env.VERCEL;
 
-    return NextResponse.json({
-      success: true,
-      message: "Image uploaded successfully.",
-      url: `/uploads/${uniqueName}`
-    });
+    if (isVercel) {
+      const base64String = buffer.toString("base64");
+      const dataUrl = `data:${file.type};base64,${base64String}`;
+      console.log(`[FILE UPLOAD] Serverless detected. Saved speaker photo as Base64 data URL.`);
+      return NextResponse.json({
+        success: true,
+        message: "Image uploaded successfully (serverless mode).",
+        url: dataUrl
+      });
+    }
+
+    try {
+      const uploadDir = path.join(process.cwd(), "public", "uploads");
+      await fs.mkdir(uploadDir, { recursive: true });
+
+      // Clean up file name to prevent path traversal & formatting issues
+      const rawName = file.name.replace(/[^a-zA-Z0-9.-]/g, "_");
+      const uniqueName = `speaker_${Date.now()}_${rawName}`;
+      const filePath = path.join(uploadDir, uniqueName);
+
+      await fs.writeFile(filePath, buffer);
+      console.log(`[FILE UPLOAD] Saved speaker photo: /uploads/${uniqueName}`);
+
+      return NextResponse.json({
+        success: true,
+        message: "Image uploaded successfully.",
+        url: `/uploads/${uniqueName}`
+      });
+    } catch (fsError) {
+      console.warn("[FILE UPLOAD] Failed to save to local disk, falling back to Base64:", fsError.message);
+      const base64String = buffer.toString("base64");
+      const dataUrl = `data:${file.type};base64,${base64String}`;
+      return NextResponse.json({
+        success: true,
+        message: "Image uploaded successfully (fallback to base64).",
+        url: dataUrl
+      });
+    }
 
   } catch (error) {
     console.error("[API ADMIN UPLOAD ERROR] Exception:", error);

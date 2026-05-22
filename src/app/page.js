@@ -125,7 +125,20 @@ export default function Home() {
         error = "Please enter a valid email address.";
       }
     } else if (name === "focus") {
-      if (!value) error = "Please select a media focus track.";
+      if (!value) {
+        error = "Please select a media focus track.";
+      } else {
+        const activeTracks = config?.focusTracks || [
+          { id: "video", name: "Video Production" },
+          { id: "audio", name: "Audio & Sound" },
+          { id: "design", name: "Graphic Design" },
+          { id: "social", name: "Social Media" },
+          { id: "content", name: "Content Strategy" }
+        ];
+        if (!activeTracks.some((t) => t.id === value)) {
+          error = "Please select a valid media focus track.";
+        }
+      }
     }
     return error;
   };
@@ -314,6 +327,25 @@ export default function Home() {
     social: { bg: "bg-blue-500/10", border: "border-blue-500/30", text: "text-blue-400", glow: "from-blue-500" },
     content: { bg: "bg-cyan-500/10", border: "border-cyan-500/30", text: "text-cyan-400", glow: "from-cyan-500" }
   };
+
+  // Safe helper to get colors for any track (with beautiful fallback)
+  const getTrackColors = (focusId) => {
+    if (!focusId) return { bg: "bg-white/5", border: "border-white/10", text: "text-white/80", glow: "from-purple-500" };
+    return trackColors[focusId] || {
+      bg: "bg-purple-500/10",
+      border: "border-purple-500/30",
+      text: "text-purple-400",
+      glow: "from-purple-500"
+    };
+  };
+
+  const focusTracks = config?.focusTracks || [
+    { id: "video", name: "Video Production" },
+    { id: "audio", name: "Audio & Sound" },
+    { id: "design", name: "Graphic Design" },
+    { id: "social", name: "Social Media" },
+    { id: "content", name: "Content Strategy" }
+  ];
 
   // Get active configuration values or static seeder fallbacks
   const eventTitle = config?.eventTitle || "Creative Create 2026";
@@ -740,11 +772,11 @@ export default function Home() {
                       required
                     >
                       <option value="">Select your focus track</option>
-                      <option value="video">Video Production</option>
-                      <option value="audio">Audio &amp; Sound</option>
-                      <option value="design">Graphic Design</option>
-                      <option value="social">Social Media</option>
-                      <option value="content">Content Strategy</option>
+                      {focusTracks.map((track) => (
+                        <option key={track.id} value={track.id}>
+                          {track.name}
+                        </option>
+                      ))}
                     </select>
                     {/* Custom Arrow for select */}
                     <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-4 text-foreground/75">
@@ -880,8 +912,8 @@ export default function Home() {
                   )}
                 </div>
                 <div>
-                  <span className={`inline-flex px-2 py-0.5 text-[9px] font-black tracking-widest uppercase rounded-full ${selectedSpeaker.focus ? trackColors[selectedSpeaker.focus].bg : "bg-white/5"} ${selectedSpeaker.focus ? trackColors[selectedSpeaker.focus].text : "text-white/80"} ${selectedSpeaker.focus ? trackColors[selectedSpeaker.focus].border : "border-white/10"} border mb-2`}>
-                    {selectedSpeaker.focus || "General"} track
+                  <span className={`inline-flex px-2 py-0.5 text-[9px] font-black tracking-widest uppercase rounded-full ${getTrackColors(selectedSpeaker.focus).bg} ${getTrackColors(selectedSpeaker.focus).text} ${getTrackColors(selectedSpeaker.focus).border} border mb-2`}>
+                    {focusTracks.find(t => t.id === selectedSpeaker.focus)?.name || selectedSpeaker.focus || "General"} Track
                   </span>
                   <h3 className="font-sora text-xl font-extrabold text-foreground leading-tight">{selectedSpeaker.name}</h3>
                   <p className="font-hanken text-sm text-foreground/70 mt-1 font-semibold">{selectedSpeaker.role}</p>
@@ -954,8 +986,8 @@ export default function Home() {
                 <div className="absolute top-1/2 -right-3.5 w-6 h-6 rounded-full bg-[#06050c] transform -translate-y-1/2 border-l border-dashed border-primary/20"></div>
 
                 {/* Focus track specific visual halo */}
-                {recentRegistration.focus && trackColors[recentRegistration.focus] && (
-                  <div className={`absolute top-0 right-0 w-24 h-24 rounded-full filter blur-2xl opacity-40 bg-gradient-to-br ${trackColors[recentRegistration.focus].glow} to-transparent`}></div>
+                {recentRegistration.focus && (
+                  <div className={`absolute top-0 right-0 w-24 h-24 rounded-full filter blur-2xl opacity-40 bg-gradient-to-br ${getTrackColors(recentRegistration.focus).glow} to-transparent`}></div>
                 )}
                 
                 <div className="flex flex-col sm:flex-row items-center sm:items-start justify-between gap-4 border-b border-white/10 pb-4 mb-4 select-text">
@@ -987,9 +1019,9 @@ export default function Home() {
                 <div className="grid grid-cols-2 gap-x-3 gap-y-3.5 text-xs mb-4 select-text">
                   <div>
                     <span className="text-[9px] text-outline font-bold uppercase tracking-wider block">MEDIA FOCUS</span>
-                    <span className="font-semibold text-white capitalize text-[11px] flex items-center gap-1">
-                      <span className={`w-2 h-2 rounded-full ${recentRegistration.focus && trackColors[recentRegistration.focus] ? trackColors[recentRegistration.focus].glow.replace("from-", "bg-") : "bg-primary"}`}></span>
-                      {recentRegistration.focus} Track
+                    <span className="font-semibold text-white text-[11px] flex items-center gap-1">
+                      <span className={`w-2 h-2 rounded-full ${recentRegistration.focus ? getTrackColors(recentRegistration.focus).glow.replace("from-", "bg-") : "bg-primary"}`}></span>
+                      {focusTracks.find(t => t.id === recentRegistration.focus)?.name || recentRegistration.focus} Track
                     </span>
                   </div>
                   <div>

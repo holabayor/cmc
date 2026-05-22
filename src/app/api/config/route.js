@@ -68,6 +68,13 @@ const DEFAULT_CONFIG = {
   registrationLimit: 100,
   isRegistrationEnabled: true,
   registrationClosedMessage: "Registration is now full. Thank you for your interest!",
+  focusTracks: [
+    { id: "video", name: "Video Production" },
+    { id: "audio", name: "Audio & Sound" },
+    { id: "design", name: "Graphic Design" },
+    { id: "social", name: "Social Media" },
+    { id: "content", name: "Content Strategy" }
+  ],
   speakers: [
     {
       id: "david",
@@ -316,7 +323,7 @@ export async function POST(req) {
     }
 
     const body = await req.json();
-    const { eventTitle, eventDate, registrationLimit, isRegistrationEnabled, registrationClosedMessage, speakers, schedule } = body;
+    const { eventTitle, eventDate, registrationLimit, isRegistrationEnabled, registrationClosedMessage, speakers, schedule, focusTracks } = body;
 
     // Build update object with exact validation
     const updatedConfig = {
@@ -326,7 +333,8 @@ export async function POST(req) {
       isRegistrationEnabled: isRegistrationEnabled ?? true,
       registrationClosedMessage: registrationClosedMessage ? registrationClosedMessage.trim() : DEFAULT_CONFIG.registrationClosedMessage,
       speakers: Array.isArray(speakers) ? speakers : [],
-      schedule: Array.isArray(schedule) ? schedule : []
+      schedule: Array.isArray(schedule) ? schedule : [],
+      focusTracks: Array.isArray(focusTracks) ? focusTracks : DEFAULT_CONFIG.focusTracks
     };
 
     // --- SAVE: Firebase Firestore ---

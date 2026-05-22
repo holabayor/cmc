@@ -62,7 +62,7 @@ async function saveLocalRegistration(registration) {
 }
 
 // Helper to send registration confirmation email using Resend HTTP API (No local SDK package dependency)
-async function sendConfirmationEmail(record) {
+async function sendConfirmationEmail(record, focusTracks) {
   if (!process.env.RESEND_API_KEY) {
     console.log("[EMAIL WARNING] RESEND_API_KEY env variable is not configured. Confirmation email skipped.");
     return;
@@ -76,7 +76,8 @@ async function sendConfirmationEmail(record) {
     const senderEmail = process.env.RESEND_FROM_EMAIL || "onboarding@resend.dev";
     
     // Construct premium HSL dark-themed HTML email layout matching the app aesthetics
-    const focusLabel = record.focus.charAt(0).toUpperCase() + record.focus.slice(1);
+    const matchedTrack = focusTracks?.find(t => t.id === record.focus);
+    const focusLabel = matchedTrack ? matchedTrack.name : (record.focus.charAt(0).toUpperCase() + record.focus.slice(1));
     
     const emailHtml = `
       <!DOCTYPE html>
@@ -232,13 +233,7 @@ export async function POST(req) {
       );
     }
 
-    const validFocuses = ["video", "audio", "design", "social", "content"];
-    if (!focus || !validFocuses.includes(focus)) {
-      return NextResponse.json(
-        { error: "Please select a valid media focus track." },
-        { status: 400 }
-      );
-    }
+    // (Focus validation deferred until configuration is retrieved below)
 
     // 2. Fetch Active Config & Counts for Enforcing Limits
     let config = null;
@@ -331,6 +326,22 @@ export async function POST(req) {
       } catch (err) {}
     }
 
+    // Dynamic Focus validation
+    const dynamicFocusTracks = config?.focusTracks || [
+      { id: "video", name: "Video Production" },
+      { id: "audio", name: "Audio & Sound" },
+      { id: "design", name: "Graphic Design" },
+      { id: "social", name: "Social Media" },
+      { id: "content", name: "Content Strategy" }
+    ];
+    const validFocuses = dynamicFocusTracks.map(t => t.id);
+    if (!focus || !validFocuses.includes(focus)) {
+      return NextResponse.json(
+        { error: "Please select a valid media focus track." },
+        { status: 400 }
+      );
+    }
+
     // Enforce limits and activation state
     const limit = config ? config.registrationLimit : 100;
     const isEnabled = config ? config.isRegistrationEnabled : true;
@@ -420,7 +431,7 @@ export async function POST(req) {
           }
 
           console.log(`[DATABASE] Saved registration to Supabase REST: ${registrationRecord.email}`);
-          await sendConfirmationEmail(registrationRecord);
+          await sendConfirmationEmail(registrationRecord, dynamicFocusTracks);
           saveResponse = NextResponse.json({
             success: true,
             message: "Registration completed successfully.",
@@ -473,7 +484,7 @@ export async function POST(req) {
           
           await pool.end();
           console.log(`[DATABASE] Saved registration to cloud Postgres: ${registrationRecord.email}`);
-          await sendConfirmationEmail(registrationRecord);
+          await sendConfirmationEmail(registrationRecord, dynamicFocusTracks);
           saveResponse = NextResponse.json({
             success: true,
             message: "Registration successfully saved to database.",
@@ -516,7 +527,7 @@ export async function POST(req) {
           // Insert
           await ref.doc(registrationRecord.id).set(registrationRecord);
           console.log(`[DATABASE] Saved registration to Firebase Firestore: ${registrationRecord.email}`);
-          await sendConfirmationEmail(registrationRecord);
+          await sendConfirmationEmail(registrationRecord, dynamicFocusTracks);
           saveResponse = NextResponse.json({
             success: true,
             message: "Registration successfully saved to database.",
@@ -545,7 +556,7 @@ export async function POST(req) {
           try {
             await saveLocalRegistration(registrationRecord);
             console.warn(`[DATABASE WARNING] No environment credentials set or cloud databases failed. Falling back to local file DB: ${LOCAL_DB_PATH}`);
-            await sendConfirmationEmail(registrationRecord);
+            await sendConfirmationEmail(registrationRecord, dynamicFocusTracks);
             saveResponse = NextResponse.json({
               success: true,
               message: "Registration completed successfully.",
