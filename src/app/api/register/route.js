@@ -2,9 +2,24 @@ import { NextResponse } from "next/server";
 import fs from "fs/promises";
 import path from "path";
 
-// Path for local dev fallback database
-const LOCAL_DB_PATH = path.join(process.cwd(), "registrations_dev.json");
-const CONFIG_PATH = path.join(process.cwd(), "config_dev.json");
+// Helper to resolve dynamic database paths for read-only serverless environments like Vercel
+const getDbPaths = () => {
+  const isServerless = process.env.VERCEL || process.env.LAMBDA_TASK_ROOT || process.env.NODE_ENV === "production";
+  if (isServerless) {
+    return {
+      config: path.join("/tmp", "config_dev.json"),
+      registrations: path.join("/tmp", "registrations_dev.json")
+    };
+  }
+  return {
+    config: path.join(/*turbopackIgnore: true*/ process.cwd(), "config_dev.json"),
+    registrations: path.join(/*turbopackIgnore: true*/ process.cwd(), "registrations_dev.json")
+  };
+};
+
+const DB_PATHS = getDbPaths();
+const CONFIG_PATH = DB_PATHS.config;
+const LOCAL_DB_PATH = DB_PATHS.registrations;
 
 // Helper to validate email format
 const isValidEmail = (email) => {
@@ -36,9 +51,14 @@ async function getLocalRegistrations() {
 }
 
 async function saveLocalRegistration(registration) {
-  const registrations = await getLocalRegistrations();
-  registrations.push(registration);
-  await fs.writeFile(LOCAL_DB_PATH, JSON.stringify(registrations, null, 2), "utf-8");
+  try {
+    const registrations = await getLocalRegistrations();
+    registrations.push(registration);
+    await fs.writeFile(LOCAL_DB_PATH, JSON.stringify(registrations, null, 2), "utf-8");
+  } catch (error) {
+    console.error("[DATABASE ERROR] Failed to save local registration JSON:", error);
+    throw new Error("Failed to write to local registrations database: " + error.message);
+  }
 }
 
 // Helper to send registration confirmation email using Resend HTTP API (No local SDK package dependency)
@@ -253,7 +273,7 @@ export async function POST(req) {
     }
 
     // --- CHECK CONFIG: PostgreSQL / Supabase ---
-    else if (process.env.DATABASE_URL) {
+    if (!config && process.env.DATABASE_URL) {
       try {
         const { Pool } = require("pg");
         const pool = new Pool({
@@ -344,9 +364,10 @@ export async function POST(req) {
     };
 
     // 3. Database Integration Selector
+    let saveResponse = null;
 
     // --- INTEGRATION: Supabase REST API (if SUPABASE_URL and SUPABASE_ANON_KEY are configured) ---
-    if (process.env.SUPABASE_URL && process.env.SUPABASE_ANON_KEY) {
+    if (!saveResponse && process.env.SUPABASE_URL && process.env.SUPABASE_ANON_KEY) {
       try {
         const supabaseUrl = process.env.SUPABASE_URL.replace(/\/$/, ""); // Strip trailing slash
         const headers = {
@@ -365,56 +386,55 @@ export async function POST(req) {
         if (checkRes.ok) {
           const matchingRows = await checkRes.json();
           if (matchingRows.length > 0) {
-            return NextResponse.json(
+            saveResponse = NextResponse.json(
               { error: "This email address is already registered." },
               { status: 409 }
             );
           }
         }
 
-        // Insert record with check-in defaults
-        const insertPayload = {
-          id: registrationRecord.id,
-          full_name: registrationRecord.fullName,
-          email: registrationRecord.email,
-          phone: registrationRecord.phone,
-          focus: registrationRecord.focus,
-          church: registrationRecord.church,
-          registered_at: registrationRecord.registeredAt,
-          checked_in: false,
-          checked_in_at: null
-        };
+        if (!saveResponse) {
+          // Insert record with check-in defaults
+          const insertPayload = {
+            id: registrationRecord.id,
+            full_name: registrationRecord.fullName,
+            email: registrationRecord.email,
+            phone: registrationRecord.phone,
+            focus: registrationRecord.focus,
+            church: registrationRecord.church,
+            registered_at: registrationRecord.registeredAt,
+            checked_in: false,
+            checked_in_at: null
+          };
 
-        const insertRes = await fetch(`${supabaseUrl}/rest/v1/registrations`, {
-          method: "POST",
-          headers,
-          body: JSON.stringify(insertPayload)
-        });
+          const insertRes = await fetch(`${supabaseUrl}/rest/v1/registrations`, {
+            method: "POST",
+            headers,
+            body: JSON.stringify(insertPayload)
+          });
 
-        if (!insertRes.ok) {
-          const errData = await insertRes.json().catch(() => ({}));
-          console.error("[DATABASE ERROR] Supabase insertion failed:", errData);
-          return NextResponse.json(
-            { error: "Database transaction failed. Please try again." },
-            { status: 500 }
-          );
+          if (!insertRes.ok) {
+            const errData = await insertRes.json().catch(() => ({}));
+            console.error("[DATABASE ERROR] Supabase insertion failed:", errData);
+            throw new Error("Supabase insert request failed");
+          }
+
+          console.log(`[DATABASE] Saved registration to Supabase REST: ${registrationRecord.email}`);
+          await sendConfirmationEmail(registrationRecord);
+          saveResponse = NextResponse.json({
+            success: true,
+            message: "Registration completed successfully.",
+            registration: registrationRecord,
+            database: "Supabase"
+          });
         }
-
-        console.log(`[DATABASE] Saved registration to Supabase REST: ${registrationRecord.email}`);
-        await sendConfirmationEmail(registrationRecord);
-        return NextResponse.json({
-          success: true,
-          message: "Registration completed successfully.",
-          registration: registrationRecord,
-          database: "Supabase"
-        });
       } catch (sbError) {
-        console.error("[DATABASE ERROR] Supabase REST connection failed:", sbError);
+        console.error("[DATABASE ERROR] Supabase REST connection failed, trying next database:", sbError);
       }
     }
 
     // --- INTEGRATION: PostreSQL / Supabase Direct (if DATABASE_URL is configured) ---
-    else if (process.env.DATABASE_URL) {
+    if (!saveResponse && process.env.DATABASE_URL) {
       try {
         const { Pool } = require("pg");
         const pool = new Pool({
@@ -429,49 +449,45 @@ export async function POST(req) {
         );
         if (checkResult.rows.length > 0) {
           await pool.end();
-          return NextResponse.json(
+          saveResponse = NextResponse.json(
             { error: "This email address is already registered." },
             { status: 409 }
           );
+        } else {
+          // Insert record
+          await pool.query(
+            `INSERT INTO registrations (id, full_name, email, phone, focus, church, registered_at, checked_in, checked_in_at) 
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+            [
+              registrationRecord.id,
+              registrationRecord.fullName,
+              registrationRecord.email,
+              registrationRecord.phone,
+              registrationRecord.focus,
+              registrationRecord.church,
+              registrationRecord.registeredAt,
+              false,
+              null
+            ]
+          );
+          
+          await pool.end();
+          console.log(`[DATABASE] Saved registration to cloud Postgres: ${registrationRecord.email}`);
+          await sendConfirmationEmail(registrationRecord);
+          saveResponse = NextResponse.json({
+            success: true,
+            message: "Registration successfully saved to database.",
+            registration: registrationRecord,
+            database: "PostgreSQL"
+          });
         }
-
-        // Insert record
-        await pool.query(
-          `INSERT INTO registrations (id, full_name, email, phone, focus, church, registered_at, checked_in, checked_in_at) 
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-          [
-            registrationRecord.id,
-            registrationRecord.fullName,
-            registrationRecord.email,
-            registrationRecord.phone,
-            registrationRecord.focus,
-            registrationRecord.church,
-            registrationRecord.registeredAt,
-            false,
-            null
-          ]
-        );
-        
-        await pool.end();
-        console.log(`[DATABASE] Saved registration to cloud Postgres: ${registrationRecord.email}`);
-        await sendConfirmationEmail(registrationRecord);
-        return NextResponse.json({
-          success: true,
-          message: "Registration successfully saved to database.",
-          registration: registrationRecord,
-          database: "PostgreSQL"
-        });
       } catch (dbError) {
-        console.error("[DATABASE ERROR] Postgres connection failed:", dbError);
-        return NextResponse.json(
-          { error: "Database transaction failed. Please try again." },
-          { status: 500 }
-        );
+        console.error("[DATABASE ERROR] Postgres connection failed, trying next database:", dbError);
       }
     }
 
     // --- INTEGRATION: Firebase Firestore (if Firebase SDK keys are configured in env) ---
-    else if (process.env.FIREBASE_PROJECT_ID && process.env.FIREBASE_CLIENT_EMAIL && process.env.FIREBASE_PRIVATE_KEY) {
+    if (!saveResponse && process.env.FIREBASE_PROJECT_ID && process.env.FIREBASE_CLIENT_EMAIL && process.env.FIREBASE_PRIVATE_KEY) {
       try {
         const admin = require("firebase-admin");
         if (!admin.apps.length) {
@@ -492,54 +508,68 @@ export async function POST(req) {
         // Duplicate Check
         const snapshot = await ref.where("email", "==", registrationRecord.email).get();
         if (!snapshot.empty) {
-          return NextResponse.json(
+          saveResponse = NextResponse.json(
             { error: "This email address is already registered." },
             { status: 409 }
           );
+        } else {
+          // Insert
+          await ref.doc(registrationRecord.id).set(registrationRecord);
+          console.log(`[DATABASE] Saved registration to Firebase Firestore: ${registrationRecord.email}`);
+          await sendConfirmationEmail(registrationRecord);
+          saveResponse = NextResponse.json({
+            success: true,
+            message: "Registration successfully saved to database.",
+            registration: registrationRecord,
+            database: "Firebase"
+          });
         }
-
-        // Insert
-        await ref.doc(registrationRecord.id).set(registrationRecord);
-        console.log(`[DATABASE] Saved registration to Firebase Firestore: ${registrationRecord.email}`);
-        await sendConfirmationEmail(registrationRecord);
-        return NextResponse.json({
-          success: true,
-          message: "Registration successfully saved to database.",
-          registration: registrationRecord,
-          database: "Firebase"
-        });
       } catch (fbError) {
-        console.error("[DATABASE ERROR] Firebase transaction failed:", fbError);
-        return NextResponse.json(
-          { error: "Database connection failed. Please try again." },
+        console.error("[DATABASE ERROR] Firebase transaction failed, trying next database:", fbError);
+      }
+    }
+
+    // --- FALLBACK: High-Fidelity Local JSON file database (Default for dev/staging) ---
+    if (!saveResponse) {
+      try {
+        const registrations = await getLocalRegistrations();
+        
+        // Duplicate email check
+        const duplicate = registrations.find((r) => r.email === registrationRecord.email);
+        if (duplicate) {
+          saveResponse = NextResponse.json(
+            { error: "This email address is already registered." },
+            { status: 409 }
+          );
+        } else {
+          try {
+            await saveLocalRegistration(registrationRecord);
+            console.warn(`[DATABASE WARNING] No environment credentials set or cloud databases failed. Falling back to local file DB: ${LOCAL_DB_PATH}`);
+            await sendConfirmationEmail(registrationRecord);
+            saveResponse = NextResponse.json({
+              success: true,
+              message: "Registration completed successfully.",
+              registration: registrationRecord,
+              database: "LocalJSON"
+            });
+          } catch (writeErr) {
+            console.error("[DATABASE ERROR] Local JSON save failed:", writeErr);
+            saveResponse = NextResponse.json(
+              { error: "Failed to persist registration record: " + writeErr.message },
+              { status: 500 }
+            );
+          }
+        }
+      } catch (readErr) {
+        console.error("[DATABASE ERROR] Local JSON read failed:", readErr);
+        saveResponse = NextResponse.json(
+          { error: "Failed to read local registration records: " + readErr.message },
           { status: 500 }
         );
       }
     }
 
-    // --- FALLBACK: High-Fidelity Local JSON file database (Default for dev/staging) ---
-    else {
-      const registrations = await getLocalRegistrations();
-      
-      // Duplicate email check
-      const duplicate = registrations.find((r) => r.email === registrationRecord.email);
-      if (duplicate) {
-        return NextResponse.json(
-          { error: "This email address is already registered." },
-          { status: 409 }
-        );
-      }
-
-      await saveLocalRegistration(registrationRecord);
-      console.warn(`[DATABASE WARNING] No environment credentials set for Supabase, Postgres or Firebase. Falling back to local file DB: ${LOCAL_DB_PATH}`);
-      await sendConfirmationEmail(registrationRecord);
-      return NextResponse.json({
-        success: true,
-        message: "Registration completed successfully.",
-        registration: registrationRecord,
-        database: "LocalJSON"
-      });
-    }
+    return saveResponse;
 
   } catch (error) {
     console.error("[API ERROR] Unexpected router exception:", error);
@@ -564,50 +594,60 @@ export async function GET(req) {
 
     // --- FETCH: Firebase ---
     if (process.env.FIREBASE_PROJECT_ID && process.env.FIREBASE_CLIENT_EMAIL && process.env.FIREBASE_PRIVATE_KEY) {
-      const admin = require("firebase-admin");
-      if (!admin.apps.length) {
-        const projectId = sanitizeEnvVar(process.env.FIREBASE_PROJECT_ID);
-        const clientEmail = sanitizeEnvVar(process.env.FIREBASE_CLIENT_EMAIL);
-        const privateKey = sanitizeEnvVar(process.env.FIREBASE_PRIVATE_KEY).replace(/\\n/g, "\n");
-        admin.initializeApp({
-          credential: admin.credential.cert({
-            projectId,
-            clientEmail,
-            privateKey,
-          }),
-        });
-      }
-      const db = admin.firestore();
-      const snapshot = await db.collection("registrations").where("email", "==", cleanEmail).get();
-      if (!snapshot.empty) {
-        attendee = snapshot.docs[0].data();
+      try {
+        const admin = require("firebase-admin");
+        if (!admin.apps.length) {
+          const projectId = sanitizeEnvVar(process.env.FIREBASE_PROJECT_ID);
+          const clientEmail = sanitizeEnvVar(process.env.FIREBASE_CLIENT_EMAIL);
+          const privateKey = sanitizeEnvVar(process.env.FIREBASE_PRIVATE_KEY).replace(/\\n/g, "\n");
+          admin.initializeApp({
+            credential: admin.credential.cert({
+              projectId,
+              clientEmail,
+              privateKey,
+            }),
+          });
+        }
+        const db = admin.firestore();
+        const snapshot = await db.collection("registrations").where("email", "==", cleanEmail).get();
+        if (!snapshot.empty) {
+          attendee = snapshot.docs[0].data();
+        }
+      } catch (fbError) {
+        console.error("[API GET REGISTRATION ERROR] Firebase lookup failed, trying fallback:", fbError);
       }
     }
+
     // --- FETCH: Postgres ---
-    else if (process.env.DATABASE_URL) {
-      const { Pool } = require("pg");
-      const pool = new Pool({
-        connectionString: process.env.DATABASE_URL,
-        ssl: { rejectUnauthorized: false }
-      });
-      const res = await pool.query("SELECT * FROM registrations WHERE email = $1", [cleanEmail]);
-      if (res.rows.length > 0) {
-        const row = res.rows[0];
-        attendee = {
-          id: row.id,
-          fullName: row.full_name,
-          email: row.email,
-          phone: row.phone || "",
-          focus: row.focus,
-          church: row.church || "",
-          registeredAt: new Date(row.registered_at).toISOString(),
-          checkedIn: row.checked_in ?? false
-        };
+    if (!attendee && process.env.DATABASE_URL) {
+      try {
+        const { Pool } = require("pg");
+        const pool = new Pool({
+          connectionString: process.env.DATABASE_URL,
+          ssl: { rejectUnauthorized: false }
+        });
+        const res = await pool.query("SELECT * FROM registrations WHERE email = $1", [cleanEmail]);
+        if (res.rows.length > 0) {
+          const row = res.rows[0];
+          attendee = {
+            id: row.id,
+            fullName: row.full_name,
+            email: row.email,
+            phone: row.phone || "",
+            focus: row.focus,
+            church: row.church || "",
+            registeredAt: new Date(row.registered_at).toISOString(),
+            checkedIn: row.checked_in ?? false
+          };
+        }
+        await pool.end();
+      } catch (pgError) {
+        console.error("[API GET REGISTRATION ERROR] PostgreSQL lookup failed, trying fallback:", pgError);
       }
-      await pool.end();
     }
+
     // --- FETCH: Local JSON ---
-    else {
+    if (!attendee) {
       const registrations = await getLocalRegistrations();
       attendee = registrations.find(r => r.email === cleanEmail) || null;
     }

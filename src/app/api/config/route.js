@@ -2,8 +2,24 @@ import { NextResponse } from "next/server";
 import fs from "fs/promises";
 import path from "path";
 
-const CONFIG_PATH = path.join(process.cwd(), "config_dev.json");
-const LOCAL_DB_PATH = path.join(process.cwd(), "registrations_dev.json");
+// Helper to resolve dynamic database paths for read-only serverless environments like Vercel
+const getDbPaths = () => {
+  const isServerless = process.env.VERCEL || process.env.LAMBDA_TASK_ROOT || process.env.NODE_ENV === "production";
+  if (isServerless) {
+    return {
+      config: path.join("/tmp", "config_dev.json"),
+      registrations: path.join("/tmp", "registrations_dev.json")
+    };
+  }
+  return {
+    config: path.join(/*turbopackIgnore: true*/ process.cwd(), "config_dev.json"),
+    registrations: path.join(/*turbopackIgnore: true*/ process.cwd(), "registrations_dev.json")
+  };
+};
+
+const DB_PATHS = getDbPaths();
+const CONFIG_PATH = DB_PATHS.config;
+const LOCAL_DB_PATH = DB_PATHS.registrations;
 
 // Helper to sanitize environment variables
 const sanitizeEnvVar = (val) => {
@@ -213,7 +229,7 @@ export async function GET(req) {
     }
 
     // --- CONNECT: PostgreSQL / Supabase ---
-    else if (process.env.DATABASE_URL) {
+    if (!config && process.env.DATABASE_URL) {
       try {
         const { Pool } = require("pg");
         const pool = new Pool({
@@ -260,8 +276,12 @@ export async function GET(req) {
       } catch (err) {
         // Seed Local JSON
         config = { ...DEFAULT_CONFIG };
-        await fs.writeFile(CONFIG_PATH, JSON.stringify(config, null, 2), "utf-8");
-        console.log("[DATABASE] Local config JSON automatically seeded!");
+        try {
+          await fs.writeFile(CONFIG_PATH, JSON.stringify(config, null, 2), "utf-8");
+          console.log("[DATABASE] Local config JSON automatically seeded!");
+        } catch (writeErr) {
+          console.warn("[DATABASE] Local config JSON could not be written (read-only filesystem or /tmp error):", writeErr.message);
+        }
       }
 
       try {
@@ -334,8 +354,16 @@ export async function POST(req) {
 
     // --- SAVE: Local JSON Fallback ---
     else {
-      await fs.writeFile(CONFIG_PATH, JSON.stringify(updatedConfig, null, 2), "utf-8");
-      console.log("[DATABASE] Local config JSON updated by Admin");
+      try {
+        await fs.writeFile(CONFIG_PATH, JSON.stringify(updatedConfig, null, 2), "utf-8");
+        console.log("[DATABASE] Local config JSON updated by Admin");
+      } catch (writeErr) {
+        console.error("[DATABASE ERROR] Failed to write local config JSON:", writeErr);
+        return NextResponse.json(
+          { error: `Failed to persist configuration locally: ${writeErr.message}` },
+          { status: 500 }
+        );
+      }
     }
 
     return NextResponse.json({

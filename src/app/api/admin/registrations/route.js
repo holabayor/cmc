@@ -2,7 +2,21 @@ import { NextResponse } from "next/server";
 import fs from "fs/promises";
 import path from "path";
 
-const LOCAL_DB_PATH = path.join(process.cwd(), "registrations_dev.json");
+// Helper to resolve dynamic database paths for read-only serverless environments like Vercel
+const getDbPaths = () => {
+  const isServerless = process.env.VERCEL || process.env.LAMBDA_TASK_ROOT || process.env.NODE_ENV === "production";
+  if (isServerless) {
+    return {
+      registrations: path.join("/tmp", "registrations_dev.json")
+    };
+  }
+  return {
+    registrations: path.join(/*turbopackIgnore: true*/ process.cwd(), "registrations_dev.json")
+  };
+};
+
+const DB_PATHS = getDbPaths();
+const LOCAL_DB_PATH = DB_PATHS.registrations;
 
 // Helper to sanitize environment variables
 const sanitizeEnvVar = (val) => {
@@ -56,7 +70,12 @@ async function getLocalRegistrations() {
 
 // Helper to save registrations locally
 async function saveLocalRegistrations(registrations) {
-  await fs.writeFile(LOCAL_DB_PATH, JSON.stringify(registrations, null, 2), "utf-8");
+  try {
+    await fs.writeFile(LOCAL_DB_PATH, JSON.stringify(registrations, null, 2), "utf-8");
+  } catch (error) {
+    console.error("[DATABASE ERROR] Failed to save local registrations JSON:", error);
+    throw new Error("Failed to write to local registrations database: " + error.message);
+  }
 }
 
 // GET all registrations (Admin Only)
@@ -70,39 +89,47 @@ export async function GET(req) {
 
     // --- FETCH: Firebase Firestore ---
     if (process.env.FIREBASE_PROJECT_ID && process.env.FIREBASE_CLIENT_EMAIL && process.env.FIREBASE_PRIVATE_KEY) {
-      const admin = getFirebaseAdmin();
-      const db = admin.firestore();
-      const snapshot = await db.collection("registrations").orderBy("registeredAt", "desc").get();
-      snapshot.forEach(doc => {
-        registrations.push(doc.data());
-      });
+      try {
+        const admin = getFirebaseAdmin();
+        const db = admin.firestore();
+        const snapshot = await db.collection("registrations").orderBy("registeredAt", "desc").get();
+        snapshot.forEach(doc => {
+          registrations.push(doc.data());
+        });
+      } catch (fbError) {
+        console.error("[API ADMIN REGISTRATIONS ERROR] Firebase fetch failed, trying fallback:", fbError);
+      }
     }
 
     // --- FETCH: PostgreSQL / Supabase ---
-    else if (process.env.DATABASE_URL) {
-      const { Pool } = require("pg");
-      const pool = new Pool({
-        connectionString: process.env.DATABASE_URL,
-        ssl: { rejectUnauthorized: false }
-      });
-      const res = await pool.query("SELECT * FROM registrations ORDER BY registered_at DESC");
-      
-      registrations = res.rows.map(row => ({
-        id: row.id,
-        fullName: row.full_name,
-        email: row.email,
-        phone: row.phone || "",
-        focus: row.focus,
-        church: row.church || "",
-        registeredAt: new Date(row.registered_at).toISOString(),
-        checkedIn: row.checked_in ?? false,
-        checkedInAt: row.checked_in_at ? new Date(row.checked_in_at).toISOString() : null
-      }));
-      await pool.end();
+    if (registrations.length === 0 && process.env.DATABASE_URL) {
+      try {
+        const { Pool } = require("pg");
+        const pool = new Pool({
+          connectionString: process.env.DATABASE_URL,
+          ssl: { rejectUnauthorized: false }
+        });
+        const res = await pool.query("SELECT * FROM registrations ORDER BY registered_at DESC");
+        
+        registrations = res.rows.map(row => ({
+          id: row.id,
+          fullName: row.full_name,
+          email: row.email,
+          phone: row.phone || "",
+          focus: row.focus,
+          church: row.church || "",
+          registeredAt: new Date(row.registered_at).toISOString(),
+          checkedIn: row.checked_in ?? false,
+          checkedInAt: row.checked_in_at ? new Date(row.checked_in_at).toISOString() : null
+        }));
+        await pool.end();
+      } catch (pgError) {
+        console.error("[API ADMIN REGISTRATIONS ERROR] PostgreSQL fetch failed, trying fallback:", pgError);
+      }
     }
 
     // --- FALLBACK: Local JSON database ---
-    else {
+    if (registrations.length === 0) {
       registrations = await getLocalRegistrations();
       // Sort desc
       registrations.sort((a, b) => new Date(b.registeredAt) - new Date(a.registeredAt));
